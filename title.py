@@ -4,27 +4,43 @@ from bs4 import BeautifulSoup
 import socket
 import chardet
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
+# Функция для извлечения заголовка страницы
 def get_title(url):
     try:
         # Проверка резолвинга домена
-        hostname = url.split("//")[-1].split("/")[0]  # Извлекаем hostname из URL
-        socket.gethostbyname(hostname)  # Если домен не резолвится, будет выброшено исключение
+        hostname = url.split("//")[-1].split("/")[0]
+        socket.gethostbyname(hostname)  # Если домен не резолвится, сайт пропускается
 
-        # Выполняем HTTP-запрос
+        # Выполняем HTTP-запрос с таймаутом 5 секунд
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            # Определение кодировки
             encoding = chardet.detect(response.content)['encoding']
-            response.encoding = encoding
-            # Парсим HTML с помощью BeautifulSoup
+            response.encoding = encoding if encoding else 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
             title = soup.title.string if soup.title else None
             return url, title.strip() if title else None
         else:
             return url, None
-    except (requests.exceptions.RequestException, socket.gaierror):
+    except (requests.exceptions.Timeout, requests.exceptions.RequestException, socket.gaierror) as e:
+        print(f"Сайт {url} пропущен из-за ошибки: {str(e)}")
         return url, None
+    except Exception as e:
+        print(f"Неожиданная ошибка для сайта {url}: {str(e)}")
+        return url, None
+
+
+# Функция для обработки URL и вывода прогресса
+def process_url(future, progress, total):
+    try:
+        result = future.result()
+        progress[0] += 1
+        print(f"Обработано {progress[0]}/{total} URL", end='\r')  # Прогресс
+        return result
+    except Exception as e:
+        print(f"Ошибка в процессе выполнения задачи: {str(e)}")
+        return None, None
 
 def main():
     parser = argparse.ArgumentParser(description='Извлечение тега <title> из сайтов.')
@@ -33,7 +49,6 @@ def main():
     parser.add_argument('-t', '--threads', type=int, default=10, help='Количество потоков для обработки запросов')
     args = parser.parse_args()
 
-    # Чтение списка сайтов из файла
     try:
         with open(args.list, 'r') as file:
             urls = [line.strip() for line in file if line.strip()]
@@ -41,27 +56,31 @@ def main():
         print(f"Файл {args.list} не найден.")
         return
 
-    # Открываем файл на запись с кодировкой UTF-8, если указан флаг -o
+    total_urls = len(urls)
+    progress = [0]  # Счетчик обработанных URL
+
     output_file = None
     if args.output:
         output_file = open(args.output, 'w', encoding='utf-8')
 
-    # Создаем ThreadPoolExecutor для параллельной обработки URL
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
-        # Отправляем задачи на выполнение и собираем результаты
         futures = {executor.submit(get_title, url): url for url in urls}
         for future in as_completed(futures):
-            url, title = future.result()
-            if title:  # Если заголовок найден и сайт доступен
-                result = f"{url}"
-                print(result)
-                if output_file:
-                    output_file.write(result + '\n')
-                    output_file.flush()  # Обеспечивает немедленную запись в файл
+            try:
+                result = process_url(future, progress, total_urls)
+                url, title = result
+                if title:
+                    result_str = f"{url}"
+                    print(result_str)
+                    if output_file:
+                        output_file.write(result_str + '\n')
+                        output_file.flush()  # Немедленная запись в файл
+            except Exception as e:
+                print(f"Ошибка при обработке: {str(e)}")
 
     if output_file:
         output_file.close()
-        print(f"Результаты сохранены в {args.output}")
+        print(f"\nРезультаты сохранены в {args.output}")
 
 if __name__ == "__main__":
     main()
