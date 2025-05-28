@@ -96,7 +96,7 @@ def write_results_to_file(ip, host, status_info):
             f.write(f"Port {port}: {port_status}\n")
 
 # Получение IP-адресов и виртуальных хостов из Shodan
-query = 'ssl:"temabit.com"'
+query = 'ssl:"example.com"'
 ip_addresses, virtual_hosts = get_ips_and_hosts_from_shodan(query)
 
 # Проверка статуса для каждого IP-адреса и виртуального хоста
